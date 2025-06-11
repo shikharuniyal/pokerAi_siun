@@ -1,197 +1,251 @@
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox
-from srcrev2 import Poker, Player
+from PIL import Image, ImageTk
+from src import Poker, Player
 
 class PokerGUI:
-    def __init__(self, root):
-        self.game = Poker([Player(f"P{i+1}", 1000) for i in range(2)])
+    def __init__(self, n_players=2):
+        # 1) Game logic
+        self.game = Poker([Player(f"P{i+1}", 1000) for i in range(n_players)])
         self.show_p1 = tk.BooleanVar(value=False)
-        self.build_ui(root)
 
-    def build_ui(self, root):
+        # 2) Load card images named like "1c.png", "10h.png", "Js.png", etc.
+        self.card_images = {}
+        self._load_card_images()
+
+        # 3) Create one window per player
+        self.player_windows = []
+        for idx in range(n_players):
+            win = tk.Toplevel()
+            win.title(f"Player {idx+1}")
+            widgets = self.build_ui(win, idx)
+            self.player_windows.append(widgets)
+
+        # 4) Initial draw
+        self.refresh_controls()
+        self.update_ui()
+
+    def _load_card_images(self):
+        # Adjust this path to point at your card PNG folder:
+        base = r"E:/#EditorCodes/Project_poker/poker_ai_dev/cards"
+        for fname in os.listdir(base):
+            name, ext = os.path.splitext(fname)
+            if ext.lower() != ".png": 
+                continue
+            # e.g. name="10h" or "Js"
+            rank = name[:-1]
+            suit = name[-1].lower()  # c, d, h, or s
+            key  = f"{rank}_{suit}"
+            path = os.path.join(base, fname)
+            img  = Image.open(path).resize((72, 96), resample=Image.LANCZOS)
+            self.card_images[key] = ImageTk.PhotoImage(img)
+
+    def build_ui(self, root, player_idx):
         # Community & pot
         fr = ttk.Frame(root); fr.pack(fill="x", pady=5)
         ttk.Label(fr, text="Community:").pack(side="left")
-        self.comm_var = tk.StringVar()
-        ttk.Label(fr, textvariable=self.comm_var).pack(side="left", padx=5)
-        ttk.Label(fr, text="  Pot:").pack(side="left", padx=(20,0))
-        self.pot_var = tk.StringVar()
-        ttk.Label(fr, textvariable=self.pot_var).pack(side="left")
+        comm_var = tk.StringVar(); ttk.Label(fr, textvariable=comm_var).pack(side="left", padx=5)
+        ttk.Label(fr, text="Pot:").pack(side="left", padx=(20,0))
+        pot_var = tk.StringVar();  ttk.Label(fr, textvariable=pot_var).pack(side="left")
 
-         # Players (with indicator)
-        self.player_vars = []
-        self.indicators = []
-        fr2 = ttk.Frame(root)
-        fr2.pack(fill="x", pady=5)
+                # — Community card images —
+        comm_img_frame = ttk.Frame(root); comm_img_frame.pack(pady=5)
+        comm_lbls = []
+        for _ in range(5):               # max 5 community cards
+            lbl = ttk.Label(comm_img_frame)
+            lbl.pack(side="left", padx=2)
+            comm_lbls.append(lbl)
 
+
+        # Hole‐card images for this player
+        hole_frame = ttk.Frame(root); hole_frame.pack(pady=5)
+        lbl1 = ttk.Label(hole_frame); lbl1.pack(side="left", padx=2)
+        lbl2 = ttk.Label(hole_frame); lbl2.pack(side="left", padx=2)
+
+        # Player list + turn indicator
+        player_vars = []; indicators = []
+        fr2 = ttk.Frame(root); fr2.pack(fill="x", pady=5)
         for _ in self.game.table.players:
-            row = ttk.Frame(fr2)
-            row.pack(fill="x", pady=2)
-
-            # 1) Indicator Label (initially blank, fixed width)
-            dot = ttk.Label(row, text=" ", width=2, anchor="center")
-            dot.pack(side="left")
-            self.indicators.append(dot)
-
-            # 2) Player info Label
+            row = ttk.Frame(fr2); row.pack(fill="x", pady=2)
+            dot = ttk.Label(row, text= " ", width=2); dot.pack(side="left")
+            indicators.append(dot)
             var = tk.StringVar()
-            lbl = ttk.Label(row, textvariable=var)
-            lbl.pack(side="left", anchor="w")
-            self.player_vars.append(var)
+            ttk.Label(row, textvariable=var).pack(side="left")
+            player_vars.append(var)
 
-        
-        
-        # Deal / Street Buttons
+        # Deal / street buttons
         cf = ttk.Frame(root); cf.pack(fill="x", pady=5)
-        self.deal_btn = ttk.Button(cf, text="Deal Hand", command=self.on_deal)
-        self.deal_btn.pack(side="left")
-        self.flop_btn = ttk.Button(cf, text="Flop", command=self.on_flop, state="disabled")
-        self.flop_btn.pack(side="left", padx=2)
-        self.turn_btn = ttk.Button(cf, text="Turn", command=self.on_turn, state="disabled")
-        self.turn_btn.pack(side="left", padx=2)
-        self.river_btn = ttk.Button(cf, text="River", command=self.on_river, state="disabled")
-        self.river_btn.pack(side="left", padx=2)
+        deal_btn  = ttk.Button(cf, text="Deal",  command=self.on_deal)
+        flop_btn  = ttk.Button(cf, text="Flop",  command=self.on_flop,  state="disabled")
+        turn_btn  = ttk.Button(cf, text="Turn",  command=self.on_turn,  state="disabled")
+        river_btn = ttk.Button(cf, text="River", command=self.on_river, state="disabled")
+        for b in (deal_btn, flop_btn, turn_btn, river_btn): b.pack(side="left", padx=2)
 
-        # Action Controls
+        # Action controls
         af = ttk.Frame(root); af.pack(fill="x", pady=5)
         ttk.Label(af, text="Action:").pack(side="left")
-        self.action_cb = ttk.Combobox(af, values=[], state="readonly", width=8)
-        self.action_cb.pack(side="left", padx=2)
-        self.amt_entry = ttk.Entry(af, width=5)
-        self.amt_entry.pack(side="left")
-        self.act_btn = ttk.Button(af, text="OK", state="disabled", command=self.on_action)
-        self.act_btn.pack(side="left", padx=2)
+        action_cb = ttk.Combobox(af, state="readonly", width=8)
+        action_cb.pack(side="left", padx=2)
+        amt_entry = ttk.Entry(af, width=5); amt_entry.pack(side="left")
+        act_btn = ttk.Button(af, text="OK", state="disabled", command=self.on_action)
+        act_btn.pack(side="left", padx=2)
 
-        rf = ttk.Frame(root); rf.pack(fill="x", pady=5)
+        # Show P1 cards toggle
         ttk.Checkbutton(
-            rf,
-            text="Show Player 1 Cards",
+            root,
+            text="Show P1 Cards",
             variable=self.show_p1,
-            command=self.update_ui   # call update_ui whenever toggled
-        ).pack(side="left")
+            command=self.update_ui
+        ).pack(anchor="w", padx=5, pady=5)
 
-    def reveal_p1(self):
-        self.show_p1_cards = True
-        self.update_ui()
+        return {
+            "idx":         player_idx,
+            "comm_var":   comm_var,
+            "pot_var":    pot_var,
+            "lbl1":       lbl1,
+            "lbl2":       lbl2,
+            "player_vars":player_vars,
+            "indicators": indicators,
+            "deal_btn":   deal_btn,
+            "flop_btn":   flop_btn,
+            "turn_btn":   turn_btn,
+            "river_btn":  river_btn,
+            "action_cb":  action_cb,
+            "amt_entry":  amt_entry,
+            "act_btn":    act_btn,
+            "comm_lbls": comm_lbls,
+        }
 
     def on_deal(self):
         self.game.start_hand()
-        self.deal_btn.config(state="disabled")
+        '''for w in self.player_windows:
+            # clear community cards
+            for lbl in w["comm_lbls"]:
+                lbl.config(image="")
+            # clear hole cards
+            w["lbl1"].config(image="")
+            w["lbl2"].config(image="")
+        self.game.start_hand()'''
         self.refresh_controls()
         self.update_ui()
 
     def on_flop(self):
-        try:
-            self.game.flop()
-        except RuntimeError as e:
-            messagebox.showwarning("Cannot Flop", str(e))
-            return
-        self.refresh_controls()
-        self.update_ui()
+        try:    self.game.flop()
+        except RuntimeError as e: messagebox.showwarning("Flop", str(e)); return
+        self.refresh_controls(); self.update_ui()
 
     def on_turn(self):
-        try:
-            self.game.turn()
-        except RuntimeError as e:
-            messagebox.showwarning("Cannot Turn", str(e))
-            return
-        self.refresh_controls()
-        self.update_ui()
+        try:    self.game.turn()
+        except RuntimeError as e: messagebox.showwarning("Turn", str(e)); return
+        self.refresh_controls(); self.update_ui()
 
     def on_river(self):
-        try:
-            self.game.river()
-        except RuntimeError as e:
-            messagebox.showwarning("Cannot River", str(e))
-            return
-        self.refresh_controls()
-        self.update_ui()
+        try:    self.game.river()
+        except RuntimeError as e: messagebox.showwarning("River", str(e)); return
+        self.refresh_controls(); self.update_ui()
 
     def on_action(self):
-        action = self.action_cb.get()
+        idx = self.game.table.to_act
+        w   = self.player_windows[idx]
+        action = w["action_cb"].get()
         amt = 0
         if action == "raise":
-            try:
-                amt = int(self.amt_entry.get())
-            except ValueError:
-                messagebox.showerror("Invalid Amount", "Enter a valid integer to raise.")
-                return
-
+            try:    amt = int(w["amt_entry"].get())
+            except: messagebox.showerror("Amount","Enter a number"); return
         try:
             self.game.do(action, amt)
         except Exception as e:
-            messagebox.showerror("Action Error", str(e))
-        self.refresh_controls()
-        self.update_ui()
+            messagebox.showerror("Action", str(e))
+        self.refresh_controls(); self.update_ui()
 
     def refresh_controls(self):
-        """Enable/disable buttons based on game state."""
-        table = self.game.table
+        t = self.game.table
+        valid = self.game.actions() if t.stage in ("pre-flop","flop","turn","river") else []
+        def bets_eq():
+            return all((not p[4]) or (p[2]==t.current_bet) for p in self.game.players_state)
 
-        # Enable action controls if it's an active player's turn
-        if table.stage in ("pre-flop","flop","turn","river"):
-            valid = self.game.actions()
-            if valid:
-                self.action_cb.config(values=valid, state="readonly")
-                self.action_cb.current(0)
-                self.act_btn.config(state="normal")
+        for w in self.player_windows:
+            pidx = w["idx"]
+            active = (t.to_act==pidx)
+
+            # action
+            if t.stage in ("pre-flop","flop","turn","river") and active and valid:
+                w["action_cb"].config(values=valid, state="readonly"); w["action_cb"].current(0)
+                w["act_btn"].config(state="normal")
             else:
-                self.action_cb.config(state="disabled")
-                self.act_btn.config(state="disabled")
-        else:
-            self.action_cb.config(state="disabled")
-            self.act_btn.config(state="disabled")
+                w["action_cb"].config(state="disabled"); w["act_btn"].config(state="disabled")
 
-        # Street buttons only enabled when all active players have matched current_bet
-        def bets_equalized():
-            return all(
-                (not p[4]) or (p[2] == table.current_bet)
-                for p in self.game.players_state
-            )
+            # street
+            ready = active and bets_eq()
+            w["flop_btn"].config( state="normal" if t.stage=="pre-flop" and ready else "disabled")
+            w["turn_btn"].config( state="normal" if t.stage=="flop"    and ready else "disabled")
+            w["river_btn"].config(state="normal" if t.stage=="turn"    and ready else "disabled")
 
-        if table.stage == "pre-flop" and bets_equalized():
-            self.flop_btn.config(state="normal")
-        else:
-            self.flop_btn.config(state="disabled")
-
-        if table.stage == "flop" and bets_equalized():
-            self.turn_btn.config(state="normal")
-        else:
-            self.turn_btn.config(state="disabled")
-
-        if table.stage == "turn" and bets_equalized():
-            self.river_btn.config(state="normal")
-        else:
-            self.river_btn.config(state="disabled")
-
-        # Deal button only at very start
-        self.deal_btn.config(state="normal" if table.stage is None else "disabled")
+            # deal
+            w["deal_btn"].config(state="normal" if t.stage is None and active else "disabled")
 
     def update_ui(self):
-        # Community & Pot
-        self.comm_var.set(", ".join(map(str, self.game.community)))
-        self.pot_var .set(str(self.game.pot))
+        comm = ", ".join(map(str, self.game.community))
+        pot  = str(self.game.pot)
 
-        # Players: unpack (name, chips, current_bet, total_committed, in_hand, hole)
-        for idx, (var, st) in enumerate(zip(self.player_vars, self.game.players_state)):
-            name, chips, round_bet, total, in_hand, hole = st
-            status = "IN" if in_hand else "FD"
-            # hide Player 1s cards until reveal
-            if idx == 0 and not self.show_p1.get():
-                display_hole = ["?", "?"]
+        for w in self.player_windows:
+            pidx = w["idx"]   # the player this window represents
+
+            # 1) Community text and pot
+            w["comm_var"].set(comm)
+            w["pot_var"].set(pot)
+
+            # 2) Community card *images*
+            for ci, lbl in enumerate(w["comm_lbls"]):
+                if ci < len(self.game.community):
+                    card = self.game.community[ci]
+                    key  = f"{card.rank}_{card.suit[0].lower()}"
+                    img  = self.card_images.get(key)
+                    if img:
+                        lbl.config(image=img)
+                        lbl.image = img
+                    else:
+                        lbl.config(image="")
+                else:
+                    lbl.config(image="")
+
+            # 3) Hole-card images (only if dealt and allowed)
+            _, _, _, _, alive, hole = self.game.players_state[pidx]
+            if alive and len(hole) == 2 and (pidx != 0 or self.show_p1.get()):
+                # build keys using single-letter suits
+                r1, s1 = hole[0].rank, hole[0].suit[0].lower()
+                r2, s2 = hole[1].rank, hole[1].suit[0].lower()
+                key1, key2 = f"{r1}_{s1}", f"{r2}_{s2}"
+
+                img1 = self.card_images.get(key1)
+                img2 = self.card_images.get(key2)
+
+                if img1:
+                    w["lbl1"].config(image=img1)
+                    w["lbl1"].image = img1
+                if img2:
+                    w["lbl2"].config(image=img2)
+                    w["lbl2"].image = img2
             else:
-                display_hole = list(map(str, hole))
+                w["lbl1"].config(image="")
+                w["lbl2"].config(image="")
 
-            var.set(f"{name}: Chips={chips}, RoundBet={round_bet}, Total={total}, {status} | {', '.join(display_hole)}")
+            # 4) Player list + turn indicator
+            for j, var in enumerate(w["player_vars"]):
+                name, ch, rb, tot, inh, hole = self.game.players_state[j]
+                status = "IN" if inh else "FD"
+                disp   = ["?","?"] if (j == 0 and not self.show_p1.get()) else list(map(str, hole))
+                var.set(f"{name}: Chips={ch}, Bet={rb}, Total={tot}, {status} | {', '.join(disp)}")
 
-             # Highlight whose turn it is with a red dot
-            if idx == self.game.table.to_act and in_hand:
-                self.indicators[idx].config(text="●", foreground="red")
-            else:
-                self.indicators[idx].config(text=" ", foreground="")
+                dot = w["indicators"][j]
+                if j == self.game.table.to_act and inh:
+                    dot.config(text="●", foreground="red")
+                else:
+                    dot.config(text=" ", foreground="")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    root.title("Poker GUI")
-    PokerGUI(root)
+    root.withdraw()                # hide the extra root window
+    PokerGUI(n_players=2)          # or however many players you like
     root.mainloop()
